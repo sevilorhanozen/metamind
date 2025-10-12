@@ -2,30 +2,21 @@ import sys
 import json
 import math
 from deepface import DeepFace
+import os
+
+# Model'i başlangıçta yükle
+print("Loading model...", file=sys.stderr, flush=True)
+try:
+    DeepFace.build_model("Emotion")
+    print("Model loaded successfully", file=sys.stderr, flush=True)
+except Exception as e:
+    print(f"Model load error: {e}", file=sys.stderr, flush=True)
 
 
 def calculate_contextual_confidence(emotions):
     """
     Bağlamsal Güven Skoru Hesaplama
-    
-    Literatür Temeli:
-    - Shannon (1948): Entropy ile belirsizlik ölçümü
-    - Russell (1980): Valence (pozitif/negatif) modeli
-    - Efklides (2008): Net duygusal durum → Yüksek metacognitive güven
-    
-    Mantık:
-    1. Düşük belirsizlik (entropy) = Yüksek güven
-    2. Pozitif duygu > Negatif duygu = Yüksek güven
-    3. İkisini birleştir
-    
-    Args:
-        emotions: DeepFace'den gelen duygu skorları (yüzde değerleri)
-    
-    Returns:
-        dict: Güven skoru, kesinlik, ton ve açıklama ile tüm ara değerler
     """
-    
-    # 1. GİRDİ KONTROLÜ
     total = sum(emotions.values())
     
     if total == 0:
@@ -42,66 +33,56 @@ def calculate_contextual_confidence(emotions):
             'entropy': 0
         }
     
-    # 2. KESİNLİK HESABI (Entropy)
-    # Shannon (1948): Düşük entropy = Net duygusal durum = Yüksek kesinlik
+    # Entropy hesabı
     entropy = 0
     for prob in emotions.values():
-        p = prob / total  # Olasılık haline getir
+        p = prob / total
         if p > 0:
             entropy -= p * math.log2(p)
     
-    max_entropy = math.log2(7)  # 7 duygu var
-    certainty = (1 - entropy / max_entropy) * 100  # 0-100
+    max_entropy = math.log2(7)
+    certainty = (1 - entropy / max_entropy) * 100
     
-    # 3. DUYGUSAL TON (Valence)
-    # Russell (1980): Pozitif vs Negatif dengesi
+    # Valence hesabı
     happy = emotions.get('happy', 0)
     negative = (emotions.get('sad', 0) +
                 emotions.get('fear', 0) +
                 emotions.get('angry', 0) +
                 emotions.get('disgust', 0))
     
-    valence = happy - negative  # Negatif ile pozitif arası
+    valence = happy - negative
     
-    # 4. SURPRISE AYARLAMASI
-    # Reisenzein (2000): Surprise valence-belirsiz, bağlama göre yorumlanır
+    # Surprise ayarlaması
     surprise = emotions.get('surprise', 0)
     adjusted_valence = valence
     surprise_contribution = 0
     surprise_reason = 'Nötr Etki'
     
-    if surprise > 0.3 * total:  # Surprise önemliyse
+    if surprise > 0.3 * total:
         if valence > 0:
-            # Pozitif bağlam: Surprise güçlendirir
             surprise_contribution = surprise * 0.5
             adjusted_valence += surprise_contribution
             surprise_reason = 'Pozitif (Mutluluk Baskın)'
         elif valence < 0:
-            # Negatif bağlam: Surprise zayıflatır (şok etkisi)
             surprise_contribution = -surprise * 0.3
             adjusted_valence += surprise_contribution
             surprise_reason = 'Negatif (Olumsuz Duygular Baskın)'
-        # Nötr bağlam: Surprise etkisiz
     
-    # 5. NEUTRAL ETKİSİ
-    # Yüksek neutral = Düşük bilişsel yük AMA düşük katılım olabilir
-    # Orta neutral (0.3-0.6) optimal
+    # Neutral etkisi
     neutral = emotions.get('neutral', 0)
     neutral_penalty = 0
     
     if neutral > 0.7 * total:
-        # Çok fazla neutral: İlgisizlik olabilir
         neutral_penalty = (neutral / total - 0.7) * 0.5
     
-    # 6. FİNAL SKOR HESABI
-    # Kesinlik (60%) + Duygusal Ton (40%)
-    certainty_component = certainty / 100  # 0-1
-    emotion_component = (adjusted_valence / total + 1) / 2  # 0-1'e normalize
+    # Final skor
+    certainty_component = certainty / 100
+    emotion_component = (adjusted_valence / total + 1) / 2
     
     final_score = (certainty_component * 0.6 + emotion_component * 0.4) * 100
     final_score = max(0, min(100, final_score - neutral_penalty * 100))
     
-    # 7. AÇIKLAMA OLUŞTUR
+    # Duygusal ton
     valence_normalized = adjusted_valence / total
     if valence_normalized > 0.2:
         emotional_tone = 'pozitif'
@@ -136,47 +117,64 @@ def calculate_contextual_confidence(emotions):
     }
 
 
-def main():
+def analyze_image(img_path):
+    """Tek bir resmi analiz et"""
+    try:
+        result = DeepFace.analyze(
+            img_path=img_path,
+            actions=['emotion'],
+            enforce_detection=False,
+            detector_backend='opencv',
+            silent=True
+        )
+        
+        emotions = result[0]['emotion']
+        emotions_float = {k: float(v) for k, v in emotions.items()}
+        
+        confidence_result = calculate_contextual_confidence(emotions_float)
+        
+        total = sum(emotions_float.values())
+        emotions_percent = {k: round(v / total * 100, 1) for k, v in emotions_float.items()}
+        
+        return {
+            "confidence_score": round(confidence_result['score'], 1),
+            "details": confidence_result,
+            "emotions": emotions_percent
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def server_mode():
+    """Server modu: stdin'den resim yolu oku, stdout'a JSON yaz"""
+    # Hazır olduğunu bildir
+    print("READY", flush=True)
+    
+    # Sonsuz döngü: her satır bir resim yolu
+    for line in sys.stdin:
+        img_path = line.strip()
+        
+        if not img_path:
+            continue
+        
+        result = analyze_image(img_path)
+        print(json.dumps(result, ensure_ascii=False), flush=True)
+
+
+def single_mode():
+    """Tek seferlik mod: komut satırı argümanı"""
     if len(sys.argv) < 2:
         print(json.dumps({"error": "No image path provided"}))
         sys.exit(1)
     
     img_path = sys.argv[1]
-    
-    try:
-        # Emotion analysis
-        result = DeepFace.analyze(
-            img_path=img_path,
-            actions=['emotion'],
-            enforce_detection=False
-        )
-        
-        emotions = result[0]['emotion']
-        
-        # Convert np.float32 values to Python float
-        emotions_float = {k: float(v) for k, v in emotions.items()}
-        
-        # Apply contextual confidence formula
-        confidence_result = calculate_contextual_confidence(emotions_float)
-        
-        # Normalize emotions to percentages
-        total = sum(emotions_float.values())
-        emotions_percent = {k: round(v / total * 100, 1) for k, v in emotions_float.items()}
-        
-        # Create JSON output (same format as before)
-        output_data = {
-            "confidence_score": round(confidence_result['score'], 1),
-            "details": confidence_result,
-            "emotions": emotions_percent
-        }
-        
-        # Print formatted JSON
-        print(json.dumps(output_data, ensure_ascii=False))
-        
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
-        sys.exit(1)
+    result = analyze_image(img_path)
+    print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == "__main__":
-    main()
+    # --server flag var mı kontrol et
+    if len(sys.argv) > 1 and sys.argv[1] == '--server':
+        server_mode()
+    else:
+        single_mode()
