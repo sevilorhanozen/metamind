@@ -3,36 +3,25 @@ import { supabase } from '@/lib/supabase';
 
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData();
-    
-    // Alanları al
-    const image = formData.get('image') as File;
-    const questionId = formData.get('questionId') as string;
-    const timestamp = formData.get('timestamp') as string;
-    const sessionId = formData.get('sessionId') as string;
-    const captureMode = (formData.get('captureMode') as string) || 'manual';
-    const captureDelaySec = (formData.get('captureDelaySec') as string) || '0';
+    const data = await request.json();
+    const { image, questionId, timestamp, sessionId, captureMode, captureDelaySec } = data;
 
-    // Validasyon
-    if (!image || !questionId || !timestamp || !sessionId) {
+    if (!image || !questionId || !sessionId) {
       return NextResponse.json(
-        { 
-          success: false,
-          error: 'Missing required fields: image, questionId, timestamp, sessionId' 
-        },
+        { error: 'Missing required fields' },
         { status: 400 }
       );
     }
 
-    // Dosyayı buffer'a çevir
-    const bytes = await image.arrayBuffer();
-    const buffer = Buffer.from(bytes);
+    // Remove data:image/jpeg;base64, from the beginning of the string
+    const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
 
-    // Dosya adı oluştur
-    const meta = `mode-${captureMode}_delay-${captureDelaySec}s`;
+    // Create a unique filename
+    const meta = `mode-${captureMode || 'manual'}_delay-${captureDelaySec ?? 0}s`;
     const filename = `${sessionId}/confidence_q${questionId}_${timestamp}_${meta}.jpg`;
-
-    // Supabase Storage'a yükle
+    
+    // Upload to Supabase Storage
     const { error: uploadError } = await supabase.storage
       .from('confidence-photos')
       .upload(filename, buffer, {
@@ -42,38 +31,27 @@ export async function POST(request: NextRequest) {
       });
 
     if (uploadError) {
-      console.error('Supabase upload error:', uploadError);
+      console.error('Error uploading to Supabase:', uploadError);
       return NextResponse.json(
-        { 
-          success: false,
-          error: 'Failed to upload photo to storage',
-          details: uploadError.message
-        },
+        { error: 'Failed to upload photo' },
         { status: 500 }
       );
     }
 
-    // Public URL'i al
+    // Get the public URL
     const { data: { publicUrl } } = supabase.storage
       .from('confidence-photos')
       .getPublicUrl(filename);
 
-    // REST API Response
-    return NextResponse.json({
-      success: true,
-      data: {
-        filename,
-        url: publicUrl
-      }
+    return NextResponse.json({ 
+      success: true, 
+      filename,
+      url: publicUrl 
     });
-
   } catch (error) {
-    console.error('Save photo error:', error);
+    console.error('Error saving photo:', error);
     return NextResponse.json(
-      { 
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to save photo'
-      },
+      { error: 'Failed to save photo' },
       { status: 500 }
     );
   }
