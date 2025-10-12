@@ -138,84 +138,95 @@ export default function Quiz() {
   };
 
   // Save photo and analyze emotion in parallel
-  const saveAndAnalyzePhoto = async (imageBlob: Blob, dataUrl: string) => {
-    setIsAnalyzing(true);
+  
+const saveAndAnalyzePhoto = async (imageBlob: Blob, dataUrl: string) => {
+  setIsAnalyzing(true);
 
-    try {
-      // Prepare form data for saving
-      const saveFormData = new FormData();
-      saveFormData.append('image', imageBlob, 'capture.jpg');
-      saveFormData.append('questionId', String(quizQuestions[currentQuestion]?.id ?? null));
-      saveFormData.append('timestamp', String(Date.now()));
-      saveFormData.append('sessionId', sessionId);
-      saveFormData.append('captureMode', 'auto_after_delay');
-      saveFormData.append('captureDelaySec', '3');
+  try {
+    // FormData'yı hazırla (save-photo için)
+    const saveFormData = new FormData();
+    saveFormData.append('image', imageBlob, 'capture.jpg');
+    saveFormData.append('questionId', String(quizQuestions[currentQuestion]?.id ?? null));
+    saveFormData.append('timestamp', String(Date.now()));
+    saveFormData.append('sessionId', sessionId);
+    saveFormData.append('captureMode', 'auto_after_delay');
+    saveFormData.append('captureDelaySec', '3');
 
-      // Prepare form data for analysis
-      const analyzeFormData = new FormData();
-      analyzeFormData.append('image', imageBlob, 'capture.jpg');
+    // FormData'yı hazırla (analyze-emotion için)
+    const analyzeFormData = new FormData();
+    analyzeFormData.append('image', imageBlob, 'capture.jpg');
 
-      // Parallel calls: save and analyze
-      const [saveRes, analyzeRes] = await Promise.all([
-        fetch('/api/save-photo', {
-          method: 'POST',
-          body: saveFormData,
-        }),
-        fetch('/api/analyze-emotion', {
-          method: 'POST',
-          body: analyzeFormData,
-        }),
-      ]);
+    // Paralel çağrı: Fotoğraf kaydet + Duygu analiz et
+    const [saveRes, analyzeRes] = await Promise.all([
+      fetch('/api/save-photo', {
+        method: 'POST',
+        body: saveFormData,
+      }),
+      fetch('/api/analyze-emotion', {
+        method: 'POST',
+        body: analyzeFormData,
+      }),
+    ]);
 
-      // Parse save response
-      let savedUrl: string | undefined = undefined;
+    // Save yanıtını işle
+    let savedUrl: string | undefined = undefined;
+    if (saveRes.ok) {
       try {
-        if (saveRes.ok) {
-          const saveJson = await saveRes.json();
-          savedUrl = saveJson?.url || saveJson?.data?.url || undefined;
-        } else {
-          console.warn('Save photo API returned non-ok status');
+        const saveJson = await saveRes.json();
+        console.log('Save response:', saveJson);
+        
+        if (saveJson.success && saveJson.data?.url) {
+          savedUrl = saveJson.data.url;
+        } else if (saveJson.url) { // Eski format uyumluluğu
+          savedUrl = saveJson.url;
         }
       } catch (e) {
-        console.warn('Save photo parse error', e);
+        console.warn('Failed to parse save response:', e);
       }
-
-      // Parse analyze response
-      let confidenceScore: number | undefined = undefined;
-      try {
-        if (analyzeRes.ok) {
-          const analyzeJson = await analyzeRes.json();
-
-          if (analyzeJson.error) {
-            console.warn('Analysis API returned error:', analyzeJson.error);
-          } else if (typeof analyzeJson.confidence_score !== 'undefined') {
-            confidenceScore = Math.round(Number(analyzeJson.confidence_score));
-          } else if (typeof analyzeJson.confidence === 'number') {
-            confidenceScore = Math.round(analyzeJson.confidence);
-          } else if (analyzeJson.success && typeof analyzeJson.score !== 'undefined') {
-            confidenceScore = Math.round(Number(analyzeJson.score));
-          }
-        } else {
-          console.warn('Analyze API returned non-ok status');
-        }
-      } catch (e) {
-        console.warn('Analyze response parse error', e);
-      }
-
-      // Set pending photo with results
-      setPendingPhoto({
-        dataUrl: dataUrl,
-        url: savedUrl,
-        confidenceScore: typeof confidenceScore === 'number' ? confidenceScore : undefined,
-      });
-
-    } catch (error) {
-      console.error('Error in saveAndAnalyzePhoto:', error);
-      alert('Fotoğraf işlenirken hata oluştu. Lütfen tekrar deneyin.');
-    } finally {
-      setIsAnalyzing(false);
+    } else {
+      console.warn('Save API returned status:', saveRes.status);
     }
-  };
+
+    // Analyze yanıtını işle
+    let confidenceScore: number | undefined = undefined;
+    if (analyzeRes.ok) {
+      try {
+        const analyzeJson = await analyzeRes.json();
+        console.log('Analyze response:', analyzeJson);
+        
+        if (analyzeJson.success && analyzeJson.confidence_score) {
+          confidenceScore = Math.round(Number(analyzeJson.confidence_score));
+        } else if (analyzeJson.confidence_score) { // Doğrudan erişim
+          confidenceScore = Math.round(Number(analyzeJson.confidence_score));
+        } else if (analyzeJson.data?.confidence_score) {
+          confidenceScore = Math.round(Number(analyzeJson.data.confidence_score));
+        }
+      } catch (e) {
+        console.warn('Failed to parse analyze response:', e);
+      }
+    } else {
+      console.warn('Analyze API returned status:', analyzeRes.status);
+    }
+
+    // Pending photo'yu ayarla
+    setPendingPhoto({
+      dataUrl: dataUrl,
+      url: savedUrl,
+      confidenceScore: typeof confidenceScore === 'number' ? confidenceScore : undefined,
+    });
+
+    // Başarı mesajı
+    if (savedUrl && confidenceScore) {
+      console.log(' Fotoğraf kaydedildi ve analiz tamamlandı');
+    }
+
+  } catch (error) {
+    console.error('Error in saveAndAnalyzePhoto:', error);
+    alert('Fotoğraf işlenirken hata oluştu. Lütfen tekrar deneyin.');
+  } finally {
+    setIsAnalyzing(false);
+  }
+};
 
   // Evaluate answer logic - checks against all acceptable answers
   const evaluateAnswer = (
