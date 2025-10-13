@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import { useRouter } from "next/navigation";
 
 interface AnswerRecord {
   questionId: number;
@@ -26,7 +27,8 @@ interface ResultsAnalysisProps {
 }
 
 export default function ResultsAnalysis({ answers, questions, onRestart }: ResultsAnalysisProps) {
-  const [selectedQuestion, setSelectedQuestion] = useState(null);
+  const router = useRouter();
+  const [selectedQuestion, setSelectedQuestion] = useState<number | null>(null);
 
   // Metabilişsel hata analizi - Dinamik hesaplama
   const getMetacognitiveAnalysis = () => {
@@ -181,14 +183,13 @@ export default function ResultsAnalysis({ answers, questions, onRestart }: Resul
 
         {/* Aksiyon Butonu */}
         <div className="text-center pt-4">
-          <button 
-            onClick={() => router.push('/')}
+          <button
+            onClick={() => router.push('/onboarding')}
             className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-200 transform hover:scale-105 shadow-lg"
           >
             🔄 Yeni Test Başlat
           </button>
         </div>
-
       </div>
     </div>
   );
