@@ -2,6 +2,28 @@ import React, { useState } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { useRouter } from "next/navigation";
 
+interface ModelAnalysis {
+  mbart: {
+    label: string;
+    label_code: number;
+    feedback: string;
+    confidence: number;
+  };
+  mt5: {
+    label: string;
+    label_code: number;
+    feedback: string;
+    confidence: number;
+  };
+  agent: {
+    chosen_model: string;
+    label: string;
+    feedback: string;
+    confidence: number;
+    reasoning: string;
+  };
+}
+
 interface AnswerRecord {
   questionId: number;
   answerText: string;
@@ -10,6 +32,7 @@ interface AnswerRecord {
   confidencePhoto?: string;
   photoUrl?: string;
   modelConfidencePercent?: number;
+  modelAnalysis?: ModelAnalysis;
 }
 
 interface QuizQuestion {
@@ -178,6 +201,128 @@ export default function ResultsAnalysis({ answers, questions, onRestart }: Resul
                 </div>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* 3. BÖLÜM: AI Model Değerlendirmesi */}
+        <div className="bg-white rounded-2xl p-8 shadow-sm border border-gray-200">
+          <h2 className="text-xl font-bold text-gray-900 mb-6 text-center">
+            🤖 AI Model Değerlendirmesi
+          </h2>
+          <p className="text-gray-600 text-center mb-6">
+            Cevaplarınız 3 farklı LLM modeli tarafından analiz edildi ve en uygun değerlendirme seçildi
+          </p>
+
+          <div className="space-y-6">
+            {answers.map((answer, index) => {
+              const question = questions[index];
+              const analysis = answer.modelAnalysis;
+
+              if (!analysis) {
+                return (
+                  <div key={index} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                    <h3 className="font-semibold text-gray-900 mb-2">
+                      Soru {index + 1}: {question.question}
+                    </h3>
+                    <p className="text-gray-500 text-sm">Model analizi yapılamadı</p>
+                  </div>
+                );
+              }
+
+              // Agent'ın seçtiği final değerlendirme
+              const finalEvaluation = analysis.agent;
+
+              return (
+                <div key={index} className="bg-gradient-to-br from-gray-50 to-blue-50 rounded-lg p-6 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+                  {/* Soru Başlığı */}
+                  <div className="mb-4 pb-4 border-b border-gray-300">
+                    <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                      <span className="text-2xl">📝</span>
+                      <span>Soru {index + 1}: {question.question}</span>
+                    </h3>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between bg-white rounded-lg p-3 border border-gray-200">
+                        <div>
+                          <span className="font-medium text-blue-700">Sizin Cevabınız:</span> 
+                          <span className="ml-2">{answer.answerText}</span>
+                        </div>
+                        {typeof answer.modelConfidencePercent === 'number' && (
+                          <div className="flex items-center gap-2 ml-4">
+                            <span className="text-xs text-gray-500">Güveniniz:</span>
+                            <div className={`px-3 py-1 rounded-full text-sm font-bold ${
+                              answer.modelConfidencePercent >= 80 ? 'bg-green-100 text-green-700' :
+                              answer.modelConfidencePercent >= 60 ? 'bg-blue-100 text-blue-700' :
+                              answer.modelConfidencePercent >= 40 ? 'bg-yellow-100 text-yellow-700' :
+                              'bg-red-100 text-red-700'
+                            }`}>
+                              {answer.modelConfidencePercent}%
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-700 bg-white rounded-lg p-3 border border-green-200">
+                        <span className="font-medium text-green-700">Doğru Cevap:</span> 
+                        <span className="ml-2">{question.options[question.correctAnswer[0]]}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Öğrenci Güven Fotoğrafı */}
+                  {answer.confidencePhoto && (
+                    <div className="mb-4 bg-white rounded-lg p-3 border border-gray-200">
+                      <div className="flex items-center gap-3">
+                        <img 
+                          src={answer.confidencePhoto} 
+                          alt="Güven Fotoğrafı" 
+                          className="w-16 h-16 rounded-lg object-cover border-2 border-blue-300"
+                        />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-700">Güven Analizi</p>
+                          <p className="text-xs text-gray-500">Yüz ifadesi analizi ile %{answer.modelConfidencePercent || 0} güven tespit edildi</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* AI Model Değerlendirmesi */}
+                  <div className="bg-white rounded-xl p-5 border-2 border-blue-300 shadow-sm">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                        <span className="text-white text-xl">🧠</span>
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-gray-900">AI Değerlendirmesi</h4>
+                        <p className="text-xs text-gray-500">
+                          {finalEvaluation.chosen_model === 'mbart' ? 'mBART' : 
+                           finalEvaluation.chosen_model === 't5' ? 'MT5' : 
+                           finalEvaluation.chosen_model.toUpperCase()} modeli seçildi
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Değerlendirme Label */}
+                    <div className="mb-4">
+                      <span className="font-medium text-gray-700 text-sm">Değerlendirme:</span>
+                      <span className={`ml-2 px-3 py-1.5 rounded-full text-sm font-bold ${
+                        finalEvaluation.label === 'Tam Doğru' ? 'bg-green-100 text-green-800 border-2 border-green-300' :
+                        finalEvaluation.label === 'Çok Benzer' ? 'bg-blue-100 text-blue-800 border-2 border-blue-300' :
+                        finalEvaluation.label === 'Kısmen Doğru' ? 'bg-yellow-100 text-yellow-800 border-2 border-yellow-300' :
+                        'bg-red-100 text-red-800 border-2 border-red-300'
+                      }`}>
+                        {finalEvaluation.label}
+                      </span>
+                    </div>
+
+                    {/* Feedback */}
+                    <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-4 border border-blue-200">
+                      <p className="text-gray-800 text-sm leading-relaxed">
+                        {finalEvaluation.feedback}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
