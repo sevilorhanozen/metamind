@@ -4,6 +4,28 @@ import { useState, useRef, useEffect } from 'react';
 import { quizQuestions } from '../data/quizData';
 import ResultsAnalysis from './ResultsAnalysis';
 
+interface ModelAnalysis {
+  mbart: {
+    label: string;
+    label_code: number;
+    feedback: string;
+    confidence: number;
+  };
+  mt5: {
+    label: string;
+    label_code: number;
+    feedback: string;
+    confidence: number;
+  };
+  agent: {
+    chosen_model: string;
+    label: string;
+    feedback: string;
+    confidence: number;
+    reasoning: string;
+  };
+}
+
 interface AnswerRecord {
   questionId: number;
   answerText: string;
@@ -12,6 +34,7 @@ interface AnswerRecord {
   confidencePhoto?: string;
   photoUrl?: string;
   modelConfidencePercent?: number;
+  modelAnalysis?: ModelAnalysis;
 }
 
 export default function Quiz() {
@@ -41,10 +64,10 @@ export default function Quiz() {
     setSessionId(`quiz_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`);
   }, []);
 
-  // Quiz complete -> save results
+  // Quiz complete -> analyze with models and save results
   useEffect(() => {
     if (isQuizComplete && answers.length === quizQuestions.length) {
-      saveQuizResults();
+      analyzeAllAnswersWithModels();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isQuizComplete]);
@@ -281,11 +304,89 @@ export default function Quiz() {
 
   const calculateScore = () => answers.filter((a) => a.isCorrect).length;
 
-  const saveQuizResults = async () => {
-    const score = calculateScore();
+  // Model analizi ile tüm cevapları analiz et
+  const analyzeAllAnswersWithModels = async () => {
+    console.log('🔬 Model analizleri başlıyor...');
+    setIsAnalyzing(true);
+
+    try {
+      const analyzedAnswers = [];
+
+      for (let i = 0; i < answers.length; i++) {
+        const answer = answers[i];
+        const question = quizQuestions[i];
+        const correctAnswerText = question.options[question.correctAnswer[0]];
+
+        console.log(`Analiz ediliyor ${i + 1}/${answers.length}:`, {
+          question: question.question,
+          studentAnswer: answer.answerText,
+          correctAnswer: correctAnswerText,
+        });
+
+        try {
+          // Model analizini çağır - PRODUCTION MODE
+          console.log(`🤖 Calling REAL MODEL endpoint for question ${i + 1}`);
+          const analysisRes = await fetch('/api/analyze-answers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              question: question.question,
+              studentAnswer: answer.answerText,
+              correctAnswer: correctAnswerText,
+              student_confidence: answer.modelConfidencePercent || null,
+              topic: question.topic || null,
+            }),
+          });
+
+          if (analysisRes.ok) {
+            const analysisData = await analysisRes.json();
+            
+            console.log(`📊 API Response ${i + 1}:`, analysisData);
+            
+            if (analysisData.success && analysisData.models) {
+              analyzedAnswers.push({
+                ...answer,
+                modelAnalysis: analysisData.models,
+              });
+              console.log(`✅ Analiz tamamlandı ${i + 1}/${answers.length}`);
+            } else {
+              console.error('❌ Model analizi başarısız:', analysisData.error || 'Bilinmeyen hata');
+              console.error('Full response:', JSON.stringify(analysisData, null, 2));
+              analyzedAnswers.push(answer);
+            }
+          } else {
+            const errorText = await analysisRes.text();
+            console.error(`❌ API hatası (${analysisRes.status}):`, errorText);
+            analyzedAnswers.push(answer);
+          }
+        } catch (error) {
+          console.error('Analiz hatası:', error);
+          // Hata olsa bile cevabı ekle
+          analyzedAnswers.push(answer);
+        }
+      }
+
+      // Analizli cevapları state'e kaydet
+      setAnswers(analyzedAnswers);
+      console.log('✅ Tüm model analizleri tamamlandı!');
+      
+      // Sonuçları kaydet
+      await saveQuizResults(analyzedAnswers);
+      
+    } catch (error) {
+      console.error('Model analizi hatası:', error);
+      // Hata olsa bile sonuçları kaydet
+      await saveQuizResults(answers);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const saveQuizResults = async (answersToSave = answers) => {
+    const score = answersToSave.filter((a) => a.isCorrect).length;
     const scorePercentage = (score / quizQuestions.length) * 100;
 
-    const formattedAnswers = answers.map((answer, index) => {
+    const formattedAnswers = answersToSave.map((answer, index) => {
       const question = quizQuestions[index];
       // Get the first correct answer text for display
       const correctAnswerText = question.options[question.correctAnswer[0]];
@@ -326,8 +427,35 @@ export default function Quiz() {
     }
   };
 
-  // If quiz complete show results
+  // If quiz complete show results or loading
   if (isQuizComplete) {
+    // Show loading screen during analysis
+    if (isAnalyzing) {
+      return (
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-6">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
+            <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center mx-auto mb-6">
+              <span className="text-5xl">🧠</span>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+              AI Modelleri Analiz Yapıyor...
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              Cevaplarınız 3 farklı LLM modeli (mBART, MT5, Agent) tarafından analiz ediliyor.
+              Bu işlem 1-2 dakika sürebilir.
+            </p>
+            <div className="flex items-center justify-center gap-3">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            </div>
+            <div className="mt-6 text-sm text-gray-500 dark:text-gray-400">
+              <p>✨ Lütfen bekleyin...</p>
+              <p className="mt-2">🤖 Modeller yükleniyor ve tahminler yapılıyor</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <ResultsAnalysis
         answers={answers}
