@@ -186,20 +186,22 @@ export default function Quiz() {
       const analyzeFormData = new FormData();
       analyzeFormData.append('image', imageBlob, 'capture.jpg');
 
-      // Parallel calls: save and analyze
-      const [saveRes, analyzeRes] = await Promise.all([
-        fetch('/api/save-photo', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(saveData),
-        }),
-        fetch('/api/analyze-emotion', {
-          method: 'POST',
-          body: analyzeFormData,
-        }),
-      ]);
+      // Sequential calls: save first, then analyze
+      const saveRes = await fetch('/api/save-photo', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(saveData),
+      });
+
+      // Wait a bit before emotion analysis to prevent Python model conflicts
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      const analyzeRes = await fetch('/api/analyze-emotion', {
+        method: 'POST',
+        body: analyzeFormData,
+      });
 
       // Parse save response
       let savedUrl: string | undefined = undefined;
